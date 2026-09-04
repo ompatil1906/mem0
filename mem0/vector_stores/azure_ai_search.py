@@ -184,10 +184,40 @@ class AzureAISearch(VectorStoreBase):
             self._generate_document(vector, payload, id) for id, vector, payload in zip(ids, vectors, payloads)
         ]
         response = self.search_client.upload_documents(documents)
-        for doc in response:
-            if not hasattr(doc, "status_code") and doc.get("status_code") != 201:
-                raise Exception(f"Insert failed for document {doc.get('id')}: {doc}")
+        self._validate_indexing_results(response, "Insert")
         return response
+
+    @staticmethod
+    def _indexing_result_field(result, name):
+        if isinstance(result, dict):
+            return result.get(name)
+        return getattr(result, name, None)
+
+    def _validate_indexing_results(self, results, operation, fallback_key=None):
+        """
+        Raise if any per-document indexing result reports a failure.
+
+        Azure returns ``IndexingResult`` objects exposing ``key``, ``succeeded``, ``status_code`` and
+        ``error_message``; dict-shaped results are also accepted.
+
+        Args:
+            results (Iterable): Per-document results returned by the search client.
+            operation (str): Operation name used in the error message.
+            fallback_key (str, optional): Document key to report when the result carries none.
+        """
+        for result in results:
+            succeeded = self._indexing_result_field(result, "succeeded")
+            if succeeded is True:
+                continue
+            status_code = self._indexing_result_field(result, "status_code")
+            if succeeded is None and isinstance(status_code, int) and 200 <= status_code < 300:
+                continue
+            key = (
+                self._indexing_result_field(result, "key") or self._indexing_result_field(result, "id") or fallback_key
+            )
+            error_message = self._indexing_result_field(result, "error_message")
+            raise Exception(f"{operation} failed for document {key}: {error_message or result}")
+        return results
 
     def _sanitize_key(self, key: str) -> str:
         return re.sub(r"[^\w]", "", key)
@@ -289,9 +319,7 @@ class AzureAISearch(VectorStoreBase):
             vector_id (str): ID of the vector to delete.
         """
         response = self.search_client.delete_documents(documents=[{"id": vector_id}])
-        for doc in response:
-            if not hasattr(doc, "status_code") and doc.get("status_code") != 200:
-                raise Exception(f"Delete failed for document {vector_id}: {doc}")
+        self._validate_indexing_results(response, "Delete", fallback_key=vector_id)
         logger.info(f"Deleted document with ID '{vector_id}' from index '{self.index_name}'.")
         return response
 
@@ -313,9 +341,7 @@ class AzureAISearch(VectorStoreBase):
             for field in ["user_id", "run_id", "agent_id"]:
                 document[field] = payload.get(field)
         response = self.search_client.merge_or_upload_documents(documents=[document])
-        for doc in response:
-            if not hasattr(doc, "status_code") and doc.get("status_code") != 200:
-                raise Exception(f"Update failed for document {vector_id}: {doc}")
+        self._validate_indexing_results(response, "Update", fallback_key=vector_id)
         return response
 
     def get(self, vector_id) -> OutputData:

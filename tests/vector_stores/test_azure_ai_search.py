@@ -719,3 +719,78 @@ def test_build_filter_escapes_quotes(azure_ai_search_instance):
     instance, _, _ = azure_ai_search_instance
     expr = instance._build_filter_expression({"name": "O'Brien"})
     assert "name eq 'O''Brien'" in expr
+
+
+# --- Tests for indexing result validation (Azure SDK IndexingResult objects) ---
+
+
+class FakeIndexingResult:
+    """Mirrors azure.search.documents.models.IndexingResult."""
+
+    def __init__(self, key, status_code, succeeded, error_message=None):
+        self.key = key
+        self.status_code = status_code
+        self.succeeded = succeeded
+        self.error_message = error_message
+
+
+def test_insert_raises_on_failed_indexing_result(azure_ai_search_instance):
+    """A failed IndexingResult from upload_documents must not be swallowed."""
+    instance, mock_search_client, _ = azure_ai_search_instance
+    mock_search_client.upload_documents.return_value = [
+        FakeIndexingResult(key="doc1", status_code=500, succeeded=False, error_message="Internal Server Error")
+    ]
+
+    with pytest.raises(Exception) as exc_info:
+        instance.insert([[0.1, 0.2, 0.3]], [{"user_id": "user1"}], ["doc1"])
+
+    assert "Insert failed for document doc1" in str(exc_info.value)
+    assert "Internal Server Error" in str(exc_info.value)
+
+
+def test_insert_accepts_successful_indexing_result(azure_ai_search_instance):
+    """A successful IndexingResult must not raise."""
+    instance, mock_search_client, _ = azure_ai_search_instance
+    mock_search_client.upload_documents.return_value = [
+        FakeIndexingResult(key="doc1", status_code=201, succeeded=True)
+    ]
+
+    instance.insert([[0.1, 0.2, 0.3]], [{"user_id": "user1"}], ["doc1"])
+
+
+def test_update_raises_on_failed_indexing_result(azure_ai_search_instance):
+    """A failed IndexingResult from merge_or_upload_documents must not be swallowed."""
+    instance, mock_search_client, _ = azure_ai_search_instance
+    mock_search_client.merge_or_upload_documents.return_value = [
+        FakeIndexingResult(key="doc1", status_code=400, succeeded=False, error_message="Bad Request")
+    ]
+
+    with pytest.raises(Exception) as exc_info:
+        instance.update("doc1", payload={"user_id": "user1"})
+
+    assert "Update failed for document doc1" in str(exc_info.value)
+    assert "Bad Request" in str(exc_info.value)
+
+
+def test_delete_raises_on_failed_indexing_result(azure_ai_search_instance):
+    """A failed IndexingResult from delete_documents must not be swallowed."""
+    instance, mock_search_client, _ = azure_ai_search_instance
+    mock_search_client.delete_documents.return_value = [
+        FakeIndexingResult(key="doc1", status_code=503, succeeded=False, error_message="Service Unavailable")
+    ]
+
+    with pytest.raises(Exception) as exc_info:
+        instance.delete("doc1")
+
+    assert "Delete failed for document doc1" in str(exc_info.value)
+    assert "Service Unavailable" in str(exc_info.value)
+
+
+def test_delete_accepts_successful_indexing_result(azure_ai_search_instance):
+    """A successful IndexingResult must not raise."""
+    instance, mock_search_client, _ = azure_ai_search_instance
+    mock_search_client.delete_documents.return_value = [
+        FakeIndexingResult(key="doc1", status_code=200, succeeded=True)
+    ]
+
+    instance.delete("doc1")
