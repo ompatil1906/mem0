@@ -526,6 +526,11 @@ class FAISS(VectorStoreBase):
             current_payload = self.docstore[vector_id].copy()
 
         if vector is not None:
+            if len(vector) != self.embedding_model_dims:
+                raise ValueError(
+                    f"Vector dimension {len(vector)} does not match "
+                    f"collection embedding_model_dims {self.embedding_model_dims}"
+                )
             self.delete(vector_id)
             self.insert([vector], [current_payload], [vector_id])
         else:

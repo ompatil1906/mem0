@@ -785,3 +785,28 @@ class TestCosineNormalization:
 
             assert results[0].id == "x"
             assert results[0].score == pytest.approx(1.0, abs=1e-5)
+
+
+def test_update_rejects_incompatible_vector_without_deleting():
+    with tempfile.TemporaryDirectory() as temp_dir:
+        store = FAISS(
+            collection_name="dim_col",
+            path=os.path.join(temp_dir, "dim"),
+            embedding_model_dims=2,
+        )
+        store.insert(vectors=[[1.0, 0.0]], payloads=[{"data": "original"}], ids=["original"])
+
+        with pytest.raises(ValueError, match="dimension"):
+            store.update("original", vector=[1.0])
+
+        # Original must still be present
+        assert store.get("original") is not None
+        assert store.get("original").payload["data"] == "original"
+
+        # And after reload
+        reloaded = FAISS(
+            collection_name="dim_col",
+            path=os.path.join(temp_dir, "dim"),
+            embedding_model_dims=2,
+        )
+        assert reloaded.get("original") is not None
